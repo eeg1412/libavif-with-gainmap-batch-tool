@@ -1,0 +1,9 @@
+node_modules/
+.env
+.codex-empty-*/
+
+input/*
+!input/.gitkeep
+
+output/*
+!output/.gitkeep
