@@ -13,6 +13,6 @@
     "start": "npm run convert"
   },
   "dependencies": {
-    "libavif-with-gainmap": "^0.1.12"
+    "libavif-with-gainmap": "^0.1.15"
   }
 }
