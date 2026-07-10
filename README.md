@@ -1,78 +1,89 @@
-# libavif-with-gainmap 批量转换工具
+# AVIF Gain Map 批量转换器
 
-使用 [`libavif-with-gainmap`](https://www.npmjs.com/package/libavif-with-gainmap) 将 JPEG gain map 图片批量转换成 AVIF gain map 图片。
+将 JPEG Gain Map 图片批量转换为 AVIF Gain Map 图片，提供 Windows 桌面 GUI 和命令行两种使用方式。转换能力由 [`libavif-with-gainmap`](https://www.npmjs.com/package/libavif-with-gainmap) 提供。
 
-## 环境要求
+## Windows 桌面版
 
-- Node.js 18 或更高版本
-- `libavif-with-gainmap` 支持的 Windows x64、macOS x64/arm64 或 Linux x64/arm64
+桌面版支持：
 
-## 安装依赖
+- 选择或拖入输入、输出文件夹
+- 递归扫描 `.jpg` 和 `.jpeg` 文件
+- 设置最大边长、主图质量、Gain Map 质量、编码速度和线程数
+- 显示逐文件进度、成功数、失败数及错误详情
+- 取消当前任务、打开输出目录
+- 自动保存上次使用的设置
+- 保持输入文件夹的子目录结构
 
-```sh
+### 本地开发
+
+要求 Windows 10/11 x64、Node.js 18 或更高版本。
+
+```powershell
 npm install
+npm start
 ```
 
-## 配置环境变量
+### 运行测试
 
-复制 `.env.example` 为 `.env`，然后按需要修改配置。
+```powershell
+npm test
+```
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `MAX_RESOLUTION` | `1920` | 最大输出宽高。图片会等比缩小，永远不会放大。 |
-| `QUALITY` | `80` | AVIF 主图质量，范围是 `0` 到 `100`。 |
-| `GAIN_MAP_QUALITY` | `70` | Gain Map 质量，范围是 `0` 到 `100`。 |
-| `STRIP_METADATA` | `true` | 是否去掉 Exif/XMP 等 metadata 信息。`true` 去掉，`false` 保留。 |
-| `SPEED` | `6` | libavif 编码速度，范围是 `0` 到 `10`。数值越小越慢，通常质量越好。 |
-| `INPUT_DIR` | `input` | 输入目录，放置源 `.jpg` 或 `.jpeg` 文件。相对路径从项目根目录解析。 |
-| `OUTPUT_DIR` | `output` | 输出目录，写入 `.avif` 文件和失败清单。 |
-| `THREADS` | `all` | 传给 libavif 的 `jobs` 参数。可以是 `all` 或 `4` 这样的正整数。 |
+### 构建 Windows EXE
 
-系统环境变量优先级高于 `.env`，适合在命令行或 CI 中临时覆盖配置。
+```powershell
+npm run build:win
+```
 
-## 开始转换
+构建结果位于 `dist/`：
 
-把 gain map JPG/JPEG 文件放入 `input` 目录，然后执行：
+- `*-Setup.exe`：安装版，可选择安装目录并创建快捷方式
+- `*-Portable.exe`：免安装便携版，直接双击运行
 
-```sh
+最终用户不需要安装 Node.js、npm 或 libavif。目前预编译的底层程序支持 Windows x64。
+
+## 命令行版
+
+复制 `.env.example` 为 `.env` 并按需修改，把图片放入 `input/`，然后运行：
+
+```powershell
 npm run convert
 ```
 
-工具会递归扫描 `INPUT_DIR`，并在 `OUTPUT_DIR` 中保持相同的相对目录结构。
+默认参数：
 
-示例：
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MAX_RESOLUTION` | `1920` | 最大边长，等比例缩小且不放大 |
+| `QUALITY` | `80` | AVIF 主图质量，范围 0-100 |
+| `GAIN_MAP_QUALITY` | `85` | Gain Map 质量，范围 0-100 |
+| `STRIP_METADATA` | `true` | 是否移除 Exif/XMP 等元数据 |
+| `SPEED` | `6` | 编码速度，0 最慢且质量最好，10 最快 |
+| `INPUT_DIR` | `input` | 输入目录，递归扫描 JPG/JPEG |
+| `OUTPUT_DIR` | `output` | 输出目录 |
+| `THREADS` | `all` | 使用全部线程或指定正整数 |
 
-```text
-input/photo.jpg
-input/nested/image.jpeg
-```
+失败信息会写入输出目录中的 `failed-files.txt`。全部成功时会自动删除旧的失败记录。
 
-转换后会生成：
-
-```text
-output/photo.avif
-output/nested/image.avif
-```
-
-## 输出结果
-
-命令结束时会输出成功和失败数量：
+## 项目结构
 
 ```text
-Success: 2
-Failed: 0
+src/
+  core/converter.js     # GUI 与 CLI 共用的批量转换核心
+  cli.js                # 命令行入口
+  electron/
+    main.js             # Electron 主进程和系统能力
+    preload.js          # 安全的页面桥接接口
+  renderer/
+    index.html          # 桌面界面
+    app.js
+    style.css
+test/
+  converter.test.js
 ```
 
-如果有文件转换失败，失败文件名会按相对路径写入：
+## 打包说明
 
-```text
-output/failed-files.txt
-```
+底层 `avifgainmapconvert.exe` 作为独立资源复制到应用的 `resources/native/`，而不是放入 Electron 的 `asar`。这是因为打包在 `asar` 内的原生 EXE 无法被系统直接执行。
 
-如果全部成功，`failed-files.txt` 不会保留。
-
-## 注意事项
-
-- 只转换 `.jpg` 和 `.jpeg` 文件。
-- 没有可解析 gain map 的文件会转换失败，并出现在 `failed-files.txt` 中。
-- 输出文件会保留原始文件名主体，并使用 `.avif` 后缀。
+公开分发时建议对安装包进行 Windows 代码签名，否则 SmartScreen 可能显示“未知发布者”。

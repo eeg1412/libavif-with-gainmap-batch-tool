@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>AVIF Gain Map Converter</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" role="img">
+          <path d="M9 11a5 5 0 0 1 5-5h20a5 5 0 0 1 5 5v26a5 5 0 0 1-5 5H14a5 5 0 0 1-5-5V11Z"/>
+          <path class="brand-line" d="m14 32 7-8 5 5 4-4 4 7M17 17h.1"/>
+        </svg>
+      </div>
+      <div>
+        <h1>AVIF Gain Map Converter</h1>
+        <p>将 JPEG Gain Map 图片批量转换为 AVIF，保留目录结构。</p>
+      </div>
+      <span class="platform-badge">Windows x64</span>
+    </header>
+
+    <section class="workspace" aria-labelledby="folders-heading">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">01 · 文件夹</span>
+          <h2 id="folders-heading">选择转换位置</h2>
+        </div>
+        <span class="section-hint">支持拖入文件夹</span>
+      </div>
+
+      <div class="folder-grid">
+        <div class="folder-field drop-zone" id="inputDropZone">
+          <label for="inputDir">输入文件夹</label>
+          <div class="path-row">
+            <span class="folder-icon" aria-hidden="true">↘</span>
+            <input id="inputDir" type="text" placeholder="包含 .jpg / .jpeg 的文件夹" spellcheck="false">
+            <button class="secondary-button" id="selectInput" type="button">浏览</button>
+          </div>
+          <small>自动扫描所有子文件夹</small>
+        </div>
+
+        <div class="folder-field drop-zone" id="outputDropZone">
+          <label for="outputDir">输出文件夹</label>
+          <div class="path-row">
+            <span class="folder-icon" aria-hidden="true">↗</span>
+            <input id="outputDir" type="text" placeholder="AVIF 文件保存位置" spellcheck="false">
+            <button class="secondary-button" id="selectOutput" type="button">浏览</button>
+          </div>
+          <small>输出文件会保持原始目录层级</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-card" aria-labelledby="settings-heading">
+      <div class="section-heading compact">
+        <div>
+          <span class="eyebrow">02 · 参数</span>
+          <h2 id="settings-heading">转换设置</h2>
+        </div>
+        <button class="text-button" id="resetSettings" type="button">恢复默认</button>
+      </div>
+
+      <div class="settings-grid">
+        <label class="setting-control">
+          <span>最大边长</span>
+          <div class="input-suffix">
+            <input id="maxResolution" type="number" min="1" max="65535" step="1">
+            <span>px</span>
+          </div>
+        </label>
+
+        <label class="setting-control">
+          <span>主图质量 <output id="qualityValue">80</output></span>
+          <input id="quality" type="range" min="0" max="100" step="1">
+        </label>
+
+        <label class="setting-control">
+          <span>Gain Map 质量 <output id="gainMapQualityValue">85</output></span>
+          <input id="gainMapQuality" type="range" min="0" max="100" step="1">
+        </label>
+
+        <label class="setting-control">
+          <span>编码速度</span>
+          <select id="speed">
+            <option value="0">0 · 最慢 / 最高质量</option>
+            <option value="4">4 · 高质量</option>
+            <option value="6">6 · 均衡</option>
+            <option value="8">8 · 较快</option>
+            <option value="10">10 · 最快</option>
+          </select>
+        </label>
+
+        <label class="setting-control">
+          <span>线程数</span>
+          <select id="threads">
+            <option value="all">全部可用线程</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="4">4</option>
+            <option value="8">8</option>
+            <option value="16">16</option>
+          </select>
+        </label>
+
+        <label class="toggle-control">
+          <span>
+            <strong>移除元数据</strong>
+            <small>删除 Exif / XMP 等隐私信息</small>
+          </span>
+          <input id="stripMetadata" type="checkbox">
+          <span class="toggle" aria-hidden="true"></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="progress-card" id="progressCard" aria-live="polite">
+      <div class="progress-summary">
+        <div>
+          <span class="status-dot" id="statusDot"></span>
+          <strong id="statusText">准备就绪</strong>
+          <p id="currentFile">选择输入和输出文件夹后开始转换</p>
+        </div>
+        <span class="progress-percent" id="progressPercent">0%</span>
+      </div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="stats">
+        <span>总计 <strong id="totalCount">0</strong></span>
+        <span class="success-stat">成功 <strong id="successCount">0</strong></span>
+        <span class="failure-stat">失败 <strong id="failedCount">0</strong></span>
+      </div>
+      <details class="error-details" id="errorDetails">
+        <summary>查看失败详情</summary>
+        <ul id="errorList"></ul>
+      </details>
+    </section>
+
+    <footer class="action-bar">
+      <button class="secondary-button open-button" id="openOutput" type="button">打开输出文件夹</button>
+      <div class="action-group">
+        <button class="danger-button hidden" id="cancelConversion" type="button">取消</button>
+        <button class="primary-button" id="startConversion" type="button">
+          <span>开始转换</span>
+          <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="alert"></div>
+  <script src="app.js"></script>
+</body>
+</html>

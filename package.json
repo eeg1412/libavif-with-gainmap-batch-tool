@@ -1,18 +1,65 @@
 {
   "name": "libavif-with-gainmap-batch-tool",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Batch convert JPEG gain map images to AVIF gain map images.",
-  "main": "src/convert.js",
+  "author": "libavif-with-gainmap-batch-tool contributors",
+  "description": "Windows GUI and CLI batch converter for JPEG gain map images to AVIF gain map images.",
+  "main": "src/electron/main.js",
   "type": "commonjs",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "convert": "node src/convert.js",
-    "start": "npm run convert"
+    "start": "electron .",
+    "gui": "electron .",
+    "convert": "node src/cli.js",
+    "test": "node --test",
+    "pack": "electron-builder --dir --win x64",
+    "build:win": "electron-builder --win nsis portable --x64"
   },
   "dependencies": {
     "libavif-with-gainmap": "^0.1.15"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.eeg1412.avifgainmapconverter",
+    "productName": "AVIF Gain Map Converter",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!node_modules/libavif-with-gainmap-win32-x64/vendor/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/libavif-with-gainmap-win32-x64/vendor/win32-x64/avifgainmapconvert.exe",
+        "to": "native/avifgainmapconvert.exe"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.svg",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "AVIF-Gain-Map-Converter-${version}-${arch}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AVIF Gain Map Converter"
+    },
+    "portable": {
+      "artifactName": "AVIF-Gain-Map-Converter-${version}-${arch}-Portable.${ext}",
+      "requestExecutionLevel": "user"
+    }
   }
 }
