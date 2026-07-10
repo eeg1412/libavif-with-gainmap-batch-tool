@@ -1,6 +1,6 @@
 {
   "name": "libavif-with-gainmap-batch-tool",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "author": "libavif-with-gainmap-batch-tool contributors",
   "description": "Windows GUI and CLI batch converter for JPEG gain map images to AVIF gain map images.",
