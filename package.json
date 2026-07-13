@@ -1,13 +1,13 @@
 {
-  "name": "libavif-with-gainmap-batch-tool",
-  "version": "2.0.1",
+  "name": "blog-image-compression-tool",
+  "version": "3.0.0",
   "private": true,
-  "author": "libavif-with-gainmap-batch-tool contributors",
-  "description": "Windows GUI and CLI batch converter for JPEG gain map images to AVIF gain map images.",
+  "author": "blog-image-compression-tool contributors",
+  "description": "Windows GUI and CLI batch image compression tool with static, animated GIF and JPEG gain map workflows.",
   "main": "src/electron/main.js",
   "type": "commonjs",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9.0"
   },
   "scripts": {
     "start": "electron .",
@@ -18,15 +18,16 @@
     "build:win": "electron-builder --win nsis portable --x64"
   },
   "dependencies": {
-    "libavif-with-gainmap": "^0.1.15"
+    "libavif-with-gainmap": "^0.1.15",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "electron": "^43.1.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.eeg1412.avifgainmapconverter",
-    "productName": "AVIF Gain Map Converter",
+    "appId": "com.eeg1412.blogimagecompressiontool",
+    "productName": "博客图片压缩工具",
     "asar": true,
     "directories": {
       "output": "dist"
@@ -40,6 +41,10 @@
       {
         "from": "node_modules/libavif-with-gainmap-win32-x64/vendor/win32-x64/avifgainmapconvert.exe",
         "to": "native/avifgainmapconvert.exe"
+      },
+      {
+        "from": "node_modules/libavif-with-gainmap-win32-x64/vendor/win32-x64/avifgainmapprobe.exe",
+        "to": "native/avifgainmapprobe.exe"
       }
     ],
     "win": {
@@ -50,15 +55,15 @@
       ]
     },
     "nsis": {
-      "artifactName": "AVIF-Gain-Map-Converter-${version}-${arch}-Setup.${ext}",
+      "artifactName": "Blog-Image-Compression-Tool-${version}-${arch}-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AVIF Gain Map Converter"
+      "shortcutName": "博客图片压缩工具"
     },
     "portable": {
-      "artifactName": "AVIF-Gain-Map-Converter-${version}-${arch}-Portable.${ext}",
+      "artifactName": "Blog-Image-Compression-Tool-${version}-${arch}-Portable.${ext}",
       "requestExecutionLevel": "user"
     }
   }

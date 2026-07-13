@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('desktopApi', {
   loadSettings() {
     return ipcRenderer.invoke('settings:load');
   },
+  watchInputDirectory(options) {
+    return ipcRenderer.invoke('input:watch', options);
+  },
+  stopWatchingInputDirectory() {
+    return ipcRenderer.invoke('input:unwatch');
+  },
   startConversion(config) {
     return ipcRenderer.invoke('conversion:start', config);
   },
@@ -25,5 +31,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on('conversion:progress', listener);
     return () => ipcRenderer.removeListener('conversion:progress', listener);
+  },
+  onInputCount(callback) {
+    const listener = (_event, result) => callback(result);
+    ipcRenderer.on('input:count', listener);
+    return () => ipcRenderer.removeListener('input:count', listener);
   }
 });

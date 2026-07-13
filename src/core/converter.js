@@ -1,42 +1,88 @@
 'use strict';
 
 const fs = require('node:fs/promises');
+const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { convertJpegGainMap } = require('libavif-with-gainmap');
+const sharp = require('sharp');
+const {
+  convertJpegGainMap,
+  probeJpegGainMap
+} = require('libavif-with-gainmap');
 
 const DEFAULTS = Object.freeze({
-  maxResolution: 1920,
-  quality: 80,
+  staticFormat: 'webp',
+  staticQuality: 80,
+  staticMaxResolution: 1920,
+  animatedFormat: 'webp',
+  animatedQuality: 80,
+  animatedMaxResolution: 1920,
+  gainMapFormat: 'avif',
+  gainMapBaseQuality: 80,
   gainMapQuality: 85,
-  stripMetadata: true,
+  gainMapMaxResolution: 1920,
+  preserveMetadata: false,
   speed: 6,
   threads: 'all'
 });
 
 const FAILURE_FILE_NAME = 'failed-files.txt';
 const JPEG_EXTENSIONS = new Set(['.jpg', '.jpeg']);
+const IMAGE_EXTENSIONS = new Set([
+  ...JPEG_EXTENSIONS,
+  '.png', '.webp', '.gif', '.avif', '.tif', '.tiff'
+]);
 
 function normalizeConfig(rawConfig = {}) {
   return {
     inputDir: requireDirectoryPath('inputDir', rawConfig.inputDir),
     outputDir: requireDirectoryPath('outputDir', rawConfig.outputDir),
-    maxResolution: integerInRange(
-      'maxResolution',
-      rawConfig.maxResolution ?? DEFAULTS.maxResolution,
-      1,
-      65535
+    staticFormat: enumValue(
+      'staticFormat',
+      rawConfig.staticFormat ?? DEFAULTS.staticFormat,
+      ['webp', 'avif']
     ),
-    quality: integerInRange('quality', rawConfig.quality ?? DEFAULTS.quality, 0, 100),
-    gainMapQuality: integerInRange(
+    staticQuality: sharpQualityValue(
+      'staticQuality',
+      rawConfig.staticQuality ?? DEFAULTS.staticQuality
+    ),
+    staticMaxResolution: resolutionValue(
+      'staticMaxResolution',
+      rawConfig.staticMaxResolution ?? DEFAULTS.staticMaxResolution
+    ),
+    animatedFormat: enumValue(
+      'animatedFormat',
+      rawConfig.animatedFormat ?? DEFAULTS.animatedFormat,
+      ['webp']
+    ),
+    animatedQuality: sharpQualityValue(
+      'animatedQuality',
+      rawConfig.animatedQuality ?? DEFAULTS.animatedQuality
+    ),
+    animatedMaxResolution: resolutionValue(
+      'animatedMaxResolution',
+      rawConfig.animatedMaxResolution ?? DEFAULTS.animatedMaxResolution
+    ),
+    gainMapFormat: enumValue(
+      'gainMapFormat',
+      rawConfig.gainMapFormat ?? DEFAULTS.gainMapFormat,
+      ['avif']
+    ),
+    gainMapBaseQuality: qualityValue(
+      'gainMapBaseQuality',
+      rawConfig.gainMapBaseQuality ?? DEFAULTS.gainMapBaseQuality
+    ),
+    gainMapQuality: qualityValue(
       'gainMapQuality',
-      rawConfig.gainMapQuality ?? DEFAULTS.gainMapQuality,
-      0,
-      100
+      rawConfig.gainMapQuality ?? DEFAULTS.gainMapQuality
     ),
-    stripMetadata: booleanValue(
-      'stripMetadata',
-      rawConfig.stripMetadata ?? DEFAULTS.stripMetadata
+    gainMapMaxResolution: resolutionValue(
+      'gainMapMaxResolution',
+      rawConfig.gainMapMaxResolution ?? DEFAULTS.gainMapMaxResolution
+    ),
+    preserveMetadata: booleanValue(
+      'preserveMetadata',
+      rawConfig.preserveMetadata ?? DEFAULTS.preserveMetadata
     ),
     speed: integerInRange('speed', rawConfig.speed ?? DEFAULTS.speed, 0, 10),
     threads: normalizeThreads(rawConfig.threads ?? DEFAULTS.threads),
@@ -47,16 +93,28 @@ function normalizeConfig(rawConfig = {}) {
 async function convertBatch(rawConfig, options = {}) {
   const config = normalizeConfig(rawConfig);
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
-  const convert = options.convert || convertJpegGainMap;
+  const dependencies = {
+    sharpFactory: options.sharpFactory || sharp,
+    probeGainMap: options.probeGainMap || probeJpegGainMap,
+    convertGainMap: options.convertGainMap || options.convert || convertJpegGainMap
+  };
   const signal = options.signal;
 
   throwIfAborted(signal);
+  if (samePath(config.inputDir, config.outputDir)) {
+    throw new Error('输入文件夹和输出文件夹不能相同。');
+  }
   await fs.mkdir(config.inputDir, { recursive: true });
   await fs.mkdir(config.outputDir, { recursive: true });
 
   onProgress({ type: 'scanning' });
-  const files = await listJpegFiles(config.inputDir, signal);
+  const files = await listImageFiles(config.inputDir, signal, {
+    excludeDirectory: isPathInside(config.outputDir, config.inputDir)
+      ? config.outputDir
+      : undefined
+  });
   const failureFile = path.join(config.outputDir, FAILURE_FILE_NAME);
+  const claimedOutputs = new Set();
   const result = {
     total: files.length,
     processed: 0,
@@ -64,6 +122,8 @@ async function convertBatch(rawConfig, options = {}) {
     failedCount: 0,
     cancelled: false,
     failures: [],
+    collisionCount: 0,
+    typeCounts: { static: 0, animated: 0, gainmap: 0 },
     outputDir: config.outputDir
   };
 
@@ -76,35 +136,55 @@ async function convertBatch(rawConfig, options = {}) {
     }
 
     const relativeInput = path.relative(config.inputDir, inputFile);
-    const outputFile = getOutputFilePath(config.outputDir, relativeInput);
     const baseEvent = {
       index: index + 1,
       total: files.length,
       inputFile,
-      outputFile,
       relativeInput
     };
 
     onProgress({ type: 'file-start', ...baseEvent });
 
+    let temporaryFile;
     try {
+      const image = await inspectImage(inputFile, config, dependencies, signal);
+      const { outputFile, renamed } = claimOutputFilePath(
+        config.outputDir,
+        relativeInput,
+        image.outputFormat,
+        claimedOutputs
+      );
       await fs.mkdir(path.dirname(outputFile), { recursive: true });
-      await convert(inputFile, outputFile, {
-        quality: config.quality,
-        gainMapQuality: config.gainMapQuality,
-        stripMetadata: config.stripMetadata,
-        maxWidth: config.maxResolution,
-        maxHeight: config.maxResolution,
-        speed: config.speed,
-        jobs: config.threads,
-        signal,
-        binDir: config.binDir
-      });
+      temporaryFile = getTemporaryOutputFilePath(outputFile);
 
+      if (image.type === 'gainmap') {
+        await convertGainMapImage(inputFile, temporaryFile, config, dependencies, signal);
+      } else if (image.type === 'animated') {
+        await convertAnimatedImage(
+          inputFile,
+          temporaryFile,
+          image.metadata,
+          config,
+          dependencies,
+          signal
+        );
+      } else {
+        await convertStaticImage(inputFile, temporaryFile, config, dependencies, signal);
+      }
+
+      throwIfAborted(signal);
+      await commitOutputFile(temporaryFile, outputFile);
+      temporaryFile = undefined;
       result.successCount += 1;
+      if (renamed) result.collisionCount += 1;
+      result.typeCounts[image.type] += 1;
       onProgress({
         type: 'file-success',
         ...baseEvent,
+        outputFile,
+        relativeOutput: path.relative(config.outputDir, outputFile),
+        renamedOutput: renamed,
+        imageType: image.type,
         processed: index + 1,
         successCount: result.successCount,
         failedCount: result.failedCount
@@ -126,6 +206,8 @@ async function convertBatch(rawConfig, options = {}) {
         failedCount: result.failedCount,
         error: failure.error
       });
+    } finally {
+      if (temporaryFile) await removeIfExists(temporaryFile);
     }
 
     result.processed = index + 1;
@@ -144,7 +226,97 @@ async function convertBatch(rawConfig, options = {}) {
   return result;
 }
 
-async function listJpegFiles(directory, signal) {
+async function inspectImage(inputFile, config, dependencies, signal) {
+  throwIfAborted(signal);
+  const metadata = await dependencies.sharpFactory(inputFile).metadata();
+
+  if (metadata.format === 'jpeg') {
+    const probe = await dependencies.probeGainMap(inputFile, {
+      jobs: config.threads,
+      signal,
+      binDir: config.binDir
+    });
+    if (probe.hasGainMap) {
+      return { type: 'gainmap', outputFormat: config.gainMapFormat, metadata: probe };
+    }
+  }
+
+  if (metadata.format === 'gif' && Number(metadata.pages) > 1) {
+    return { type: 'animated', outputFormat: config.animatedFormat, metadata };
+  }
+  return { type: 'static', outputFormat: config.staticFormat, metadata };
+}
+
+async function convertStaticImage(inputFile, outputFile, config, dependencies, signal) {
+  throwIfAborted(signal);
+  let pipeline = dependencies.sharpFactory(inputFile)
+    .autoOrient()
+    .resize({
+      width: config.staticMaxResolution,
+      height: config.staticMaxResolution,
+      fit: 'inside',
+      withoutEnlargement: true
+    });
+
+  if (config.preserveMetadata) pipeline = pipeline.keepMetadata();
+  pipeline = config.staticFormat === 'avif'
+    ? pipeline.avif({ quality: config.staticQuality })
+    : pipeline.webp({ quality: config.staticQuality });
+  await pipeline.toFile(outputFile);
+}
+
+async function convertAnimatedImage(
+  inputFile,
+  outputFile,
+  metadata,
+  config,
+  dependencies,
+  signal
+) {
+  throwIfAborted(signal);
+  let pipeline = dependencies.sharpFactory(inputFile, { animated: true }).autoOrient();
+  const frameWidth = Number(metadata.width);
+  const frameHeight = Number(metadata.pageHeight || metadata.height);
+  if (!Number.isFinite(frameWidth) || frameWidth < 1 ||
+      !Number.isFinite(frameHeight) || frameHeight < 1) {
+    throw new Error('动画 GIF 的帧尺寸无效。');
+  }
+  const longestEdge = Math.max(frameWidth, frameHeight);
+
+  if (Number.isFinite(longestEdge) && longestEdge > config.animatedMaxResolution) {
+    const targetWidth = Math.max(
+      1,
+      Math.round(frameWidth * config.animatedMaxResolution / longestEdge)
+    );
+    pipeline = pipeline.resize({ width: targetWidth, withoutEnlargement: true });
+  }
+
+  if (config.preserveMetadata) pipeline = pipeline.keepMetadata();
+  const webpOptions = {
+    quality: config.animatedQuality,
+    loop: normalizeAnimationLoop(metadata.loop)
+  };
+  const delays = normalizeAnimationDelays(metadata.delay, metadata.pages);
+  if (delays) webpOptions.delay = delays;
+  await pipeline.webp(webpOptions).toFile(outputFile);
+}
+
+async function convertGainMapImage(inputFile, outputFile, config, dependencies, signal) {
+  throwIfAborted(signal);
+  await dependencies.convertGainMap(inputFile, outputFile, {
+    quality: config.gainMapBaseQuality,
+    gainMapQuality: config.gainMapQuality,
+    stripMetadata: !config.preserveMetadata,
+    maxWidth: config.gainMapMaxResolution,
+    maxHeight: config.gainMapMaxResolution,
+    speed: config.speed,
+    jobs: config.threads,
+    signal,
+    binDir: config.binDir
+  });
+}
+
+async function listImageFiles(directory, signal, options = {}) {
   throwIfAborted(signal);
   const entries = await fs.readdir(directory, { withFileTypes: true });
   const files = [];
@@ -154,8 +326,10 @@ async function listJpegFiles(directory, signal) {
     const fullPath = path.join(directory, entry.name);
 
     if (entry.isDirectory()) {
-      files.push(...await listJpegFiles(fullPath, signal));
-    } else if (entry.isFile() && JPEG_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      if (!samePath(fullPath, options.excludeDirectory)) {
+        files.push(...await listImageFiles(fullPath, signal, options));
+      }
+    } else if (entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
       files.push(fullPath);
     }
   }
@@ -163,9 +337,102 @@ async function listJpegFiles(directory, signal) {
   return files.sort((a, b) => a.localeCompare(b));
 }
 
-function getOutputFilePath(outputDir, relativeInput) {
+function getOutputFilePath(outputDir, relativeInput, outputFormat = 'avif') {
   const parsed = path.parse(relativeInput);
-  return path.join(outputDir, parsed.dir, `${parsed.name}.avif`);
+  return path.join(outputDir, parsed.dir, `${parsed.name}.${outputFormat}`);
+}
+
+function claimOutputFilePath(outputDir, relativeInput, outputFormat, claimedOutputs) {
+  const parsed = path.parse(relativeInput);
+  const preferred = getOutputFilePath(outputDir, relativeInput, outputFormat);
+  if (claimPath(preferred, claimedOutputs)) {
+    return { outputFile: preferred, renamed: false };
+  }
+
+  const sourceType = parsed.ext.slice(1).toLowerCase() || 'image';
+  let suffix = sourceType;
+  let attempt = 1;
+  while (true) {
+    const outputFile = path.join(
+      outputDir,
+      parsed.dir,
+      `${parsed.name}-${suffix}.${outputFormat}`
+    );
+    if (claimPath(outputFile, claimedOutputs)) {
+      return { outputFile, renamed: true };
+    }
+    attempt += 1;
+    suffix = `${sourceType}-${attempt}`;
+  }
+}
+
+function claimPath(filePath, claimedOutputs) {
+  const key = comparablePath(filePath);
+  if (claimedOutputs.has(key)) return false;
+  claimedOutputs.add(key);
+  return true;
+}
+
+function getTemporaryOutputFilePath(outputFile) {
+  const parsed = path.parse(outputFile);
+  return path.join(parsed.dir, `.${parsed.name}.${randomUUID()}.tmp${parsed.ext}`);
+}
+
+async function commitOutputFile(temporaryFile, outputFile) {
+  try {
+    await fs.rename(temporaryFile, outputFile);
+    return;
+  } catch (error) {
+    if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+  }
+
+  const backupFile = `${outputFile}.${randomUUID()}.backup`;
+  let hasBackup = false;
+  try {
+    await fs.rename(outputFile, backupFile);
+    hasBackup = true;
+    await fs.rename(temporaryFile, outputFile);
+    await removeIfExists(backupFile);
+  } catch (error) {
+    if (hasBackup) {
+      await removeIfExists(outputFile);
+      await fs.rename(backupFile, outputFile);
+    }
+    throw error;
+  }
+}
+
+function normalizeAnimationLoop(value) {
+  const loop = Number(value);
+  if (!Number.isInteger(loop) || loop < 0) return 1;
+  return Math.min(loop, 65535);
+}
+
+function normalizeAnimationDelays(value, pages) {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const expectedPages = Number(pages);
+  if (Number.isInteger(expectedPages) && expectedPages > 0 && value.length !== expectedPages) {
+    return undefined;
+  }
+  const delays = value.map(Number);
+  return delays.every((delay) => Number.isInteger(delay) && delay >= 0)
+    ? delays
+    : undefined;
+}
+
+function comparablePath(value) {
+  if (!value) return '';
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function samePath(first, second) {
+  return Boolean(first && second) && comparablePath(first) === comparablePath(second);
+}
+
+function isPathInside(child, parent) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
 function requireDirectoryPath(name, value) {
@@ -177,6 +444,18 @@ function requireDirectoryPath(name, value) {
 
 function optionalPath(value) {
   return typeof value === 'string' && value.trim() ? path.resolve(value.trim()) : undefined;
+}
+
+function qualityValue(name, value) {
+  return integerInRange(name, value, 0, 100);
+}
+
+function sharpQualityValue(name, value) {
+  return integerInRange(name, value, 1, 100);
+}
+
+function resolutionValue(name, value) {
+  return integerInRange(name, value, 1, 65535);
 }
 
 function integerInRange(name, value, min, max) {
@@ -194,10 +473,16 @@ function booleanValue(name, value) {
   return value;
 }
 
-function normalizeThreads(value) {
-  if (String(value).toLowerCase() === 'all') {
-    return 'all';
+function enumValue(name, value, allowed) {
+  const normalized = String(value).toLowerCase();
+  if (!allowed.includes(normalized)) {
+    throw new RangeError(`${name} must be one of: ${allowed.join(', ')}.`);
   }
+  return normalized;
+}
+
+function normalizeThreads(value) {
+  if (String(value).toLowerCase() === 'all') return 'all';
   return integerInRange('threads', value, 1, 1024);
 }
 
@@ -232,8 +517,15 @@ module.exports = {
   DEFAULTS,
   FAILURE_FILE_NAME,
   convertBatch,
+  convertAnimatedImage,
+  convertStaticImage,
   formatError,
   getOutputFilePath,
-  listJpegFiles,
+  claimOutputFilePath,
+  inspectImage,
+  isPathInside,
+  listImageFiles,
+  normalizeAnimationDelays,
+  normalizeAnimationLoop,
   normalizeConfig
 };

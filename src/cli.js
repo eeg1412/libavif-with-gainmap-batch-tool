@@ -18,7 +18,7 @@ async function main() {
 
   const result = await convertBatch(config, {
     onProgress(event) {
-      if (event.type === 'ready') console.log(`JPG files: ${event.total}\n`);
+      if (event.type === 'ready') console.log(`Image files: ${event.total}\n`);
       if (event.type === 'file-start') {
         console.log(`[${event.index}/${event.total}] ${event.relativeInput}`);
       }
@@ -29,21 +29,46 @@ async function main() {
   console.log('Done.');
   console.log(`Success: ${result.successCount}`);
   console.log(`Failed: ${result.failedCount}`);
+  if (result.collisionCount > 0) {
+    console.log(`Safely renamed outputs: ${result.collisionCount}`);
+  }
   if (result.failedCount > 0) process.exitCode = 1;
 }
 
 function readConfig() {
   return normalizeConfig({
-    maxResolution: readEnv('MAX_RESOLUTION') || DEFAULTS.maxResolution,
-    quality: readEnv('QUALITY') || DEFAULTS.quality,
+    staticFormat: readEnv('STATIC_FORMAT') || DEFAULTS.staticFormat,
+    staticQuality: readEnv('STATIC_QUALITY') || readEnv('QUALITY') || DEFAULTS.staticQuality,
+    staticMaxResolution:
+      readEnv('STATIC_MAX_RESOLUTION') || readEnv('MAX_RESOLUTION') || DEFAULTS.staticMaxResolution,
+    animatedFormat: readEnv('ANIMATED_FORMAT') || DEFAULTS.animatedFormat,
+    animatedQuality:
+      readEnv('ANIMATED_QUALITY') || readEnv('QUALITY') || DEFAULTS.animatedQuality,
+    animatedMaxResolution:
+      readEnv('ANIMATED_MAX_RESOLUTION') || readEnv('MAX_RESOLUTION') || DEFAULTS.animatedMaxResolution,
+    gainMapFormat: readEnv('GAIN_MAP_FORMAT') || DEFAULTS.gainMapFormat,
+    gainMapBaseQuality:
+      readEnv('GAIN_MAP_BASE_QUALITY') || readEnv('QUALITY') || DEFAULTS.gainMapBaseQuality,
     gainMapQuality: readEnv('GAIN_MAP_QUALITY') || DEFAULTS.gainMapQuality,
-    stripMetadata: readBoolean('STRIP_METADATA', DEFAULTS.stripMetadata),
+    gainMapMaxResolution:
+      readEnv('GAIN_MAP_MAX_RESOLUTION') || readEnv('MAX_RESOLUTION') || DEFAULTS.gainMapMaxResolution,
+    preserveMetadata: readMetadataSetting(),
     speed: readEnv('SPEED') || DEFAULTS.speed,
     inputDir: resolveProjectPath(readEnv('INPUT_DIR') || 'input'),
     outputDir: resolveProjectPath(readEnv('OUTPUT_DIR') || 'output'),
     threads: readEnv('THREADS') || DEFAULTS.threads,
     binDir: readEnv('AVIF_GAINMAP_BIN_DIR') || undefined
   });
+}
+
+function readMetadataSetting() {
+  if (readEnv('PRESERVE_METADATA')) {
+    return readBoolean('PRESERVE_METADATA', DEFAULTS.preserveMetadata);
+  }
+  if (readEnv('STRIP_METADATA')) {
+    return !readBoolean('STRIP_METADATA', !DEFAULTS.preserveMetadata);
+  }
+  return DEFAULTS.preserveMetadata;
 }
 
 function resolveProjectPath(value) {
@@ -81,13 +106,14 @@ function loadDotEnv(filePath) {
 }
 
 function printConfig(config) {
-  console.log('libavif-with-gainmap batch converter');
+  console.log('博客图片压缩工具');
   console.log(`Input dir: ${config.inputDir}`);
   console.log(`Output dir: ${config.outputDir}`);
-  console.log(`Max resolution: ${config.maxResolution}`);
-  console.log(`Quality: ${config.quality}`);
+  console.log(`Static: ${config.staticFormat}, quality ${config.staticQuality}, max ${config.staticMaxResolution}px`);
+  console.log(`Animated: ${config.animatedFormat}, quality ${config.animatedQuality}, max ${config.animatedMaxResolution}px`);
+  console.log(`Gain map: ${config.gainMapFormat}, base quality ${config.gainMapBaseQuality}, max ${config.gainMapMaxResolution}px`);
   console.log(`Gain map quality: ${config.gainMapQuality}`);
-  console.log(`Strip metadata: ${config.stripMetadata}`);
+  console.log(`Preserve metadata: ${config.preserveMetadata}`);
   console.log(`Speed: ${config.speed}`);
   console.log(`Threads: ${config.threads}`);
 }
